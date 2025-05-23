@@ -4,15 +4,16 @@ use serde_json::{Map, Value};
 pub struct Set {
     key: String,
     val: String,
+    ttl: u64,
     valid: bool,
-    // todo: TTL
 }
 
 impl Set {
-    pub fn from_key_val(key: impl ToString, value: impl ToString) -> Self {
+    pub fn from_key_val(key: impl ToString, value: impl ToString, ttl: u64) -> Self {
         Set {
             key: key.to_string(),
             val: value.to_string(),
+            ttl,
             valid: true,
         }
     }
@@ -21,6 +22,7 @@ impl Set {
         Set {
             key: String::from(""),
             val: String::from(""),
+            ttl: 0,
             valid: false,
         }
     }
@@ -36,6 +38,8 @@ impl Set {
     pub fn val(&self) -> &str {
         &self.val
     }
+    
+    pub fn ttl(&self) -> u64 { self.ttl }
 }
 
 pub struct MultipleSet {

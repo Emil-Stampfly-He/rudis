@@ -26,10 +26,10 @@ impl Server {
         let listener = TcpListener::bind(self.addr).await?;
 
         loop {
-            let (socekt, _) = listener.accept().await?;
+            let (socket, _) = listener.accept().await?;
             let db = self.db.clone();
             tokio::spawn(async move {
-                process(socekt, db).await;
+                process(socket, db).await;
             });
         }
     }
