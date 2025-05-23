@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 pub struct Set {
     key: String,
     val: String,
-    ttl: u64,
+    ttl: u64, // in milliseconds
     valid: bool,
 }
 

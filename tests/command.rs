@@ -1,3 +1,4 @@
+use std::time::SystemTime;
 use rudis_http::command::Command;
 
 fn generate_buff(arg_string: &str) -> Vec<u8> {
@@ -50,4 +51,9 @@ fn from_bytes_get_invalid() {
         Command::Get(cmd) => assert!(!cmd.is_valid()),
         _ => assert!(false),
     }
+}
+
+#[test]
+fn test_unix_time() {
+    println!("Unix time now: {}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64);
 }
