@@ -38,6 +38,7 @@ $ curl 'localhost:6379/set/hello/world/1000'
 $ curl 'localhost:6379/set/hello'
 {"SET": "Invalid"}
 
+# invalid because ttl have to be specified
 $ curl 'localhost:6379/set/hello/world'
 {"SET": "Invalid"}
 ```
