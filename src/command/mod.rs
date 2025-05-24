@@ -1,20 +1,12 @@
 mod get;
 
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::SystemTime;
 pub use get::Get;
 
 mod set;
 use httparse::Request;
 use serde_json::{Map, Result, Value};
 pub use set::{MultipleSet, Set};
-
-static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<(String, Args), u64>>>> = LazyLock::new(|| {
-    // key: kv value: created time
-    Arc::new(Mutex::new(HashMap::new()))
-});
 
 pub enum Command {
     Set(Set),
@@ -121,22 +113,6 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     return Args::new_invalid("GET");
                 }
                 let key = all_path_vec[1];
-                
-                // delete from EXPIRE_MAP if expired
-                // todo: delete from the db of the server (ShardedDb)
-                {
-                    let now = current_millis();
-                    let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                    expire_map.retain(|(k, args), &mut created_time| {
-                        if key == k {
-                            if let Some(ttl) = args.ttl {
-                                return created_time + ttl > now;
-                            }
-                        }
-                        true
-                    });
-                }
-                
                 return Args {
                     valid: true,
                     command: String::from("GET"),
@@ -160,7 +136,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                 let key = all_path_vec[1];
                 let val = all_path_vec[2];
                 let ttl = all_path_vec[3];
-                let args = Args {
+                
+                return Args {
                     valid: true,
                     command: String::from("SET"),
                     key: String::from(key),
@@ -168,13 +145,6 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     ttl: Some(ttl.parse().unwrap()),
                     kv: None,
                 };
-                
-                {
-                    let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                    expire_map.insert((key.parse().unwrap(), args.clone()), current_millis());
-                }
-                
-                return args;
             }
             _ => return Args::new_invalid("INVALID"),
         }
@@ -217,11 +187,4 @@ fn split_on_path(input: &str) -> Vec<&str> {
 fn parse_json(bytes: &[u8]) -> Result<Value> {
     let value = serde_json::from_slice(bytes)?;
     Ok(value)
-}
-
-fn current_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
 }
