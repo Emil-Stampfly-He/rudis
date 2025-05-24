@@ -44,13 +44,15 @@ impl Set {
 
 pub struct MultipleSet {
     kv: Map<String, Value>,
+    ttl: u64,
     valid: bool,
 }
 
 impl MultipleSet {
-    pub fn from_json_kv(obj: Map<String, Value>) -> Option<Self> {
+    pub fn from_json_kv(obj: Map<String, Value>, ttl: u64) -> Option<Self> {
         Some(MultipleSet {
             kv: obj,
+            ttl,
             valid: true,
         })
     }
@@ -58,6 +60,7 @@ impl MultipleSet {
     pub fn new_invalid() -> Self {
         MultipleSet {
             kv: Map::new(),
+            ttl: 0,
             valid: false,
         }
     }
@@ -69,4 +72,6 @@ impl MultipleSet {
     pub fn kv(&self) -> &Map<String, Value> {
         &self.kv
     }
+    
+    pub fn ttl(&self) -> u64 { self.ttl }
 }

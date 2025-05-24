@@ -89,7 +89,7 @@ impl Command {
                     return Command::MultipleSet(MultipleSet::new_invalid());
                 }
                 let json_kv = arg.kv.unwrap();
-                if let Some(arg) = MultipleSet::from_json_kv(json_kv) {
+                if let Some(arg) = MultipleSet::from_json_kv(json_kv, arg.ttl.unwrap()) {
                     Command::MultipleSet(arg)
                 } else {
                     Command::MultipleSet(MultipleSet::new_invalid())
@@ -185,6 +185,13 @@ fn split_on_path(input: &str) -> Vec<&str> {
 }
 
 fn parse_json(bytes: &[u8]) -> Result<Value> {
-    let value = serde_json::from_slice(bytes)?;
-    Ok(value)
+    eprintln!("BODY as text: {:?}", String::from_utf8_lossy(bytes));
+    match serde_json::from_slice(bytes) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            eprintln!("❌ JSON parse error: {}", e);
+            eprintln!("❌ bytes dump: {:?}", bytes);
+            Err(e)
+        }
+    }
 }

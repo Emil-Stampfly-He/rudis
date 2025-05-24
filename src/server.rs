@@ -131,6 +131,11 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                             key.to_string(),
                             Bytes::copy_from_slice(val.as_str().unwrap().to_string().as_bytes()),
                         );
+                        
+                        {
+                            let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                            expire_map.insert((key.clone(), cmd.ttl()), current_unix_timestamp());
+                        }
                     }
                     Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
                 } else {
