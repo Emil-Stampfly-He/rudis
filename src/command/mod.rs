@@ -20,6 +20,7 @@ struct Args {
     command: String,
     key: String,
     val: Option<String>,
+    ttl: Option<u64>,
     kv: Option<Map<String, Value>>,
 }
 
@@ -30,6 +31,7 @@ impl Args {
             command: String::from(command_type),
             key: String::from(""),
             val: None,
+            ttl: None,
             kv: None,
         }
     }
@@ -59,14 +61,14 @@ impl Command {
                 if !arg.valid {
                     return Command::Set(Set::new_invalid());
                 }
-                Command::Set(Set::from_key_val(arg.key, arg.val.unwrap()))
+                Command::Set(Set::from_key_val(arg.key, arg.val.unwrap(), arg.ttl.unwrap()))
             }
             "MULTIPLE_SET" => {
                 if !arg.valid {
                     return Command::MultipleSet(MultipleSet::new_invalid());
                 }
                 let json_kv = arg.kv.unwrap();
-                if let Some(arg) = MultipleSet::from_json_kv(json_kv) {
+                if let Some(arg) = MultipleSet::from_json_kv(json_kv, arg.ttl.unwrap()) {
                     Command::MultipleSet(arg)
                 } else {
                     Command::MultipleSet(MultipleSet::new_invalid())
@@ -95,24 +97,28 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     command: String::from("GET"),
                     key: String::from(key),
                     val: None,
+                    ttl: None,
                     kv: None,
                 };
             }
             "SET" => {
-                if all_path_vec.len() < 3
+                if all_path_vec.len() < 4
                     || all_path_vec[1].is_empty()
                     || all_path_vec[2].is_empty()
-                    || all_path_vec.len() > 3
+                    || all_path_vec[3].is_empty()
+                    || all_path_vec.len() > 4
                 {
                     return Args::new_invalid("SET");
                 }
                 let key = all_path_vec[1];
                 let val = all_path_vec[2];
+                let ttl = all_path_vec[3];
                 return Args {
                     valid: true,
                     command: String::from("SET"),
                     key: String::from(key),
                     val: Some(String::from(val)),
+                    ttl: Some(ttl.parse().unwrap()),
                     kv: None,
                 };
             }
@@ -120,10 +126,11 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
         }
     } else if method == "POST" {
         // using POST request (SET ONLY) that passes kv-pair through body
-        if all_path_vec.len() != 1 {
+        if all_path_vec.len() != 2 {
             return Args::new_invalid("SET");
         }
         let body = request_buff[idx_of_body..].to_vec();
+        let ttl = all_path_vec[1];
         match parse_json(&body) {
             Ok(value) => {
                 if let Some(obj) = value.as_object() {
@@ -132,6 +139,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         command: String::from("MULTIPLE_SET"),
                         key: String::from(""),
                         val: None,
+                        ttl: Some(ttl.parse().unwrap()),
                         kv: Some(obj.clone()),
                     };
                 }
@@ -152,6 +160,14 @@ fn split_on_path(input: &str) -> Vec<&str> {
 }
 
 fn parse_json(bytes: &[u8]) -> Result<Value> {
-    let value = serde_json::from_slice(bytes)?;
-    Ok(value)
+    // log if failed to parse
+    eprintln!("BODY as text: {:?}", String::from_utf8_lossy(bytes));
+    match serde_json::from_slice(bytes) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            eprintln!("JSON parse error: {}", e);
+            eprintln!("bytes dump: {:?}", bytes);
+            Err(e)
+        }
+    }
 }
