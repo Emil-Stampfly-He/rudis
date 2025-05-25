@@ -26,7 +26,7 @@ And the server will be listening on the port you specified or `127.0.0.1:6379` b
 Once the server is up and running, its service can be accessed via http GET request. The following are the supported requests:
 ```
 GET: <your-url>/GET/<key> 
-SET: <your-url>/SET/<key>/<value>/<ttl>
+SET: <your-url>/SET/<key>/<value>[/<ttl>]
 ```
 The response will be in json format. For a SET, you will be getting the status of this command like
 ```sh
@@ -34,12 +34,12 @@ The response will be in json format. For a SET, you will be getting the status o
 $ curl 'localhost:6379/set/hello/world/1000'
 {"SET": "OK"}
 
+# no ttl specified, never expire
+$ curl 'localhost:6379/set/hello/world'
+{"SET": "OK"}
+
 # or if SET's arguments are not correct
 $ curl 'localhost:6379/set/hello'
-{"SET": "Invalid"}
-
-# invalid because ttl have to be specified
-$ curl 'localhost:6379/set/hello/world'
 {"SET": "Invalid"}
 ```
 You can also send a POST request with json as key value pair to support a SET command. 

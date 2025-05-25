@@ -81,7 +81,11 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     let mut expire_map = EXPIRE_MAP.lock().unwrap();
                     expire_map.retain(|(k, ttl), &mut created_time| {
                         if cmd.key() == k {
-                            let should_delete = created_time + ttl < now;
+                            let should_delete = { 
+                                if *ttl == u64::MAX { return false } // prevent u64 overflow
+                                created_time + ttl < now
+                            };
+                            
                             if should_delete {
                                 db.remove(k);
                             }

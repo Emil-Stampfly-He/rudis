@@ -11,7 +11,7 @@ pub use set::{MultipleSet, Set};
 pub enum Command {
     Set(Set),
     Get(Get),
-    MultipleSet(MultipleSet), // TODO: add ttl for MultipleSet
+    MultipleSet(MultipleSet),
     Invalid,
 }
 
@@ -122,29 +122,47 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     kv: None,
                 };
             }
-            // SET key value ttl
-            // curl 'localhost:6379/set/hello/world/1000'
+            // SET key value [EX]
+            // case 1: curl 'localhost:6379/set/hello/world/1000': EX 1000 ms
+            // case 2: curl 'localhost:6379/set/hello/world': EX 2^64-1 ms
             "SET" => {
-                if all_path_vec.len() < 4
-                    || all_path_vec[1].is_empty()
-                    || all_path_vec[2].is_empty()
-                    || all_path_vec[3].is_empty()
-                    || all_path_vec.len() > 4
-                {
-                    return Args::new_invalid("SET");
+                if all_path_vec.len() < 4 {
+                    if all_path_vec.len() < 3
+                        || all_path_vec[1].is_empty()
+                        || all_path_vec[2].is_empty() {
+                        return Args::new_invalid("SET");   
+                    } else {
+                        return Args {
+                            valid: true,
+                            command: String::from("SET"),
+                            key: String::from(all_path_vec[1]),
+                            val: Some(String::from(all_path_vec[2])),
+                            ttl: Some(u64::MAX),
+                            kv: None,
+                        };   
+                    }
+                } else if all_path_vec.len() > 4 {
+                    return Args::new_invalid("SET");   
+                } else {
+                    if all_path_vec[1].is_empty() 
+                        || all_path_vec[2].is_empty() 
+                        || all_path_vec[3].is_empty() {
+                        return Args::new_invalid("SET");   
+                    } else {
+                        let key = all_path_vec[1];
+                        let val = all_path_vec[2];
+                        let ttl = all_path_vec[3];
+
+                        return Args {
+                            valid: true,
+                            command: String::from("SET"),
+                            key: String::from(key),
+                            val: Some(String::from(val)),
+                            ttl: Some(ttl.parse().unwrap()),
+                            kv: None,
+                        };
+                    }
                 }
-                let key = all_path_vec[1];
-                let val = all_path_vec[2];
-                let ttl = all_path_vec[3];
-                
-                return Args {
-                    valid: true,
-                    command: String::from("SET"),
-                    key: String::from(key),
-                    val: Some(String::from(val)),
-                    ttl: Some(ttl.parse().unwrap()),
-                    kv: None,
-                };
             }
             _ => return Args::new_invalid("INVALID"),
         }
