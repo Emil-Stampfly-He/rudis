@@ -207,8 +207,7 @@ fn parse_json(bytes: &[u8]) -> Result<Value> {
     match serde_json::from_slice(bytes) {
         Ok(v) => Ok(v),
         Err(e) => {
-            eprintln!("❌ JSON parse error: {}", e);
-            eprintln!("❌ bytes dump: {:?}", bytes);
+            eprintln!("JSON parse error: {}", e);
             Err(e)
         }
     }
