@@ -7,7 +7,10 @@ use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::str;
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
+use rand::seq::IteratorRandom;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::interval;
 
 static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<String, (u64, u64)>>>> = LazyLock::new(|| {
     // key: key value: (created time, ttl)
@@ -29,6 +32,41 @@ impl Server {
 
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let listener = TcpListener::bind(self.addr).await?;
+        let db = self.db.clone();
+        
+        // active deletion executed every 100 ms for 20 random keys
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_millis(100));
+            loop {
+                interval.tick().await;
+
+                // amount of a bunch: 20
+                let sample_keys= {
+                    let expire_map = EXPIRE_MAP.lock().unwrap();
+                    expire_map
+                        .iter()
+                        .map(|(key, _)| key.clone())
+                        .choose_multiple(&mut rand::rng(), 20)
+                        .into_iter()
+                        .collect::<Vec<String>>()
+                };
+
+                let now = current_unix_timestamp();
+                for key in sample_keys {
+                    let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                    if let Some(&(created_time, ttl)) = expire_map.get(&key) {
+                        if ttl != u64::MAX && created_time + ttl < now {
+                            expire_map.remove(&key);
+                            drop(expire_map);
+
+                            let idx = hash_key(&key) % db.len();
+                            let mut db = db[idx].lock().unwrap();
+                            db.remove(&key);
+                        }
+                    }
+                }
+            }
+        });
 
         loop {
             let (socket, _) = listener.accept().await?;
@@ -73,27 +111,24 @@ async fn process(socket: TcpStream, db: ShardedDb) {
         let response: Bytes = match Command::from_bytes(&buff) {
             Command::Get(cmd) => {
                 if cmd.is_valid() {
-                    let idx = hash_key(cmd.key()) % db.len();
-                    let mut db = db[idx].lock().unwrap();
-
-                    // delete from EXPIRE_MAP & db if expired
+                    // lazy deletion from EXPIRE_MAP & db if expired
+                    // fixed lock order: lock EXPIRE_MAP first, then lock sharded db
                     let now = current_unix_timestamp();
-                    let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                    expire_map.retain(|k, &mut (created_time, ttl)| {
-                        if cmd.key() == k {
-                            let should_delete = { 
-                                if ttl == u64::MAX { return false } // prevent u64 overflow
-                                created_time + ttl < now
-                            };
-                            
-                            if should_delete {
-                                db.remove(k);
+                    let idx = hash_key(cmd.key()) % db.len();
+                    {
+                        let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                        if let Some(&(created_time, ttl)) = expire_map.get(cmd.key()) {
+                            if ttl != u64::MAX && created_time + ttl < now {
+                                expire_map.remove(cmd.key());
+                                drop(expire_map); // prevent nested lock
+                                
+                                let mut db = db[idx].lock().unwrap();
+                                db.remove(cmd.key());
                             }
-                            return !should_delete;
                         }
-                        true
-                    });
-
+                    }
+                    
+                    let db = db[idx].lock().unwrap();
                     if let Some(value) = db.get(cmd.key()) {
                         let value_string = std::str::from_utf8(value).unwrap();
                         Bytes::from(format!("{{\"{}\":\"{}\"}}", cmd.key(), value_string))
