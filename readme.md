@@ -44,14 +44,20 @@ $ curl 'localhost:6379/set/hello'
 ```
 You can also send a POST request with json as key value pair to support a SET command. 
 ```sh
+# set ttl to be 1000 ms
 $ curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world"}'
+{"SET": "OK"}
+
+# for multiple kv pairs that never expire
+$ curl -X POST 'localhost:6379/set' -d '{"hello":"world", "foo":"bar"}'
+{"SET": "OK"}
+
+# set ttl to be 1000 ms for every entry
+$ curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world", "foo":"bar"}'
 {"SET": "OK"}
 
 $ curl -X POST 'localhost:6379/set' -d '{}'
 {"SET": "Invalid"}
-# for multiple kv pairs
-$ curl -X POST 'localhost:6379/set' -d '{"hello":"world", "foo":"bar"}'
-{"SET": "OK}
 ```
 and for get, you will be getting the key value pair if there's a match, or an empty json object if there's no match
 ```sh

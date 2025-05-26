@@ -124,7 +124,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
             }
             // SET key value [EX]
             // case 1: curl 'localhost:6379/set/hello/world/1000': EX 1000 ms
-            // case 2: curl 'localhost:6379/set/hello/world': EX 2^64-1 ms
+            // case 2: curl 'localhost:6379/set/hello/world': EX 2^64-1 ms (never expire)
             "SET" => {
                 if all_path_vec.len() < 4 {
                     if all_path_vec.len() < 3
@@ -168,12 +168,14 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
         }
     } else if method == "POST" {
         // using POST request (SET ONLY) that passes kv-pair through body
-        // curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world"}'
-        if all_path_vec.len() != 2 {
+        // case 1: curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world"}' EX 1000 ms
+        // case 2: curl -X POST 'localhost:6379/set' -d '{"hello":"world"}' EX 2^64-1 ms (never expire)
+        if all_path_vec.len() > 2 && all_path_vec.len() < 1 {
             return Args::new_invalid("SET");
         }
+        
         let body = request_buff[idx_of_body..].to_vec();
-        let ttl = all_path_vec[1];
+        let ttl = if all_path_vec.len() == 2 { all_path_vec[1].parse::<u64>().unwrap() } else { u64::MAX };
         match parse_json(&body) {
             Ok(value) => {
                 if let Some(obj) = value.as_object() {
@@ -182,7 +184,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         command: String::from("MULTIPLE_SET"),
                         key: String::from(""),
                         val: None,
-                        ttl: Some(ttl.parse().unwrap()),
+                        ttl: Some(ttl),
                         kv: Some(obj.clone()),
                     };
                 }
