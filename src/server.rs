@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::interval;
 
 static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<String, (u64, u64)>>>> = LazyLock::new(|| {
-    // key: key value: (created time, ttl)
+    // key: key value: (created time, ttl_ms)
     Arc::new(Mutex::new(HashMap::new()))
 });
 
@@ -54,10 +54,10 @@ impl Server {
                 let now = current_unix_timestamp();
                 for key in sample_keys {
                     let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                    if let Some(&(created_time, ttl)) = expire_map.get(&key) {
-                        if ttl != u64::MAX && created_time + ttl < now {
+                    if let Some(&(created_time, ttl_ms)) = expire_map.get(&key) {
+                        if ttl_ms != u64::MAX && created_time + ttl_ms < now {
                             expire_map.remove(&key);
-                            drop(expire_map);
+                            drop(expire_map); // prevent nested lock
 
                             let idx = hash_key(&key) % db.len();
                             let mut db = db[idx].lock().unwrap();
@@ -117,8 +117,8 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     let idx = hash_key(cmd.key()) % db.len();
                     {
                         let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        if let Some(&(created_time, ttl)) = expire_map.get(cmd.key()) {
-                            if ttl != u64::MAX && created_time + ttl < now {
+                        if let Some(&(created_time, ttl_ms)) = expire_map.get(cmd.key()) {
+                            if ttl_ms != u64::MAX && created_time + ttl_ms < now {
                                 expire_map.remove(cmd.key());
                                 drop(expire_map); // prevent nested lock
                                 
@@ -152,7 +152,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     // insert into expire_map
                     {
                         let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        expire_map.insert(cmd.key().to_string(), (current_unix_timestamp(), cmd.ttl()));
+                        expire_map.insert(cmd.key().to_string(), (current_unix_timestamp(), cmd.ttl_ms()));
                     }
 
                     Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
@@ -173,7 +173,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                         
                         {
                             let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                            expire_map.insert(key.clone(), (current_unix_timestamp(), cmd.ttl()));
+                            expire_map.insert(key.clone(), (current_unix_timestamp(), cmd.ttl_ms()));
                         }
                     }
                     Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")

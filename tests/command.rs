@@ -31,7 +31,7 @@ fn from_bytes_set() {
         Command::Set(cmd) => {
             assert_eq!(cmd.key(), "foo");
             assert_eq!(cmd.val(), "bar");
-            assert_eq!(cmd.ttl(), u64::MAX);
+            assert_eq!(cmd.ttl_ms(), u64::MAX);
         }
         _ => assert!(false),
     }
@@ -43,7 +43,7 @@ fn from_bytes_set_with_ttl() {
         Command::Set(cmd) => {
             assert_eq!(cmd.key(), "foo");
             assert_eq!(cmd.val(), "bar");
-            assert_eq!(cmd.ttl(), 2000);
+            assert_eq!(cmd.ttl_ms(), 2000);
         }
         _ => assert!(false),
     }
