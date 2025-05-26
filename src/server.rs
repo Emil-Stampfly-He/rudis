@@ -9,8 +9,8 @@ use std::str;
 use std::sync::{Arc, LazyLock, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 
-static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<(String, u64), u64>>>> = LazyLock::new(|| {
-    // key: (key, ttl) value: created time
+static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<String, (u64, u64)>>>> = LazyLock::new(|| {
+    // key: key value: (created time, ttl)
     Arc::new(Mutex::new(HashMap::new()))
 });
 
@@ -79,10 +79,10 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     // delete from EXPIRE_MAP & db if expired
                     let now = current_unix_timestamp();
                     let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                    expire_map.retain(|(k, ttl), &mut created_time| {
+                    expire_map.retain(|k, &mut (created_time, ttl)| {
                         if cmd.key() == k {
                             let should_delete = { 
-                                if *ttl == u64::MAX { return false } // prevent u64 overflow
+                                if ttl == u64::MAX { return false } // prevent u64 overflow
                                 created_time + ttl < now
                             };
                             
@@ -117,7 +117,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     // insert into expire_map
                     {
                         let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        expire_map.insert((cmd.key().to_string(), cmd.ttl()), current_unix_timestamp());
+                        expire_map.insert(cmd.key().to_string(), (current_unix_timestamp(), cmd.ttl()));
                     }
 
                     Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
@@ -138,7 +138,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                         
                         {
                             let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                            expire_map.insert((key.clone(), cmd.ttl()), current_unix_timestamp());
+                            expire_map.insert(key.clone(), (current_unix_timestamp(), cmd.ttl()));
                         }
                     }
                     Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
