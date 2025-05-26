@@ -31,14 +31,35 @@ fn from_bytes_set() {
         Command::Set(cmd) => {
             assert_eq!(cmd.key(), "foo");
             assert_eq!(cmd.val(), "bar");
+            assert_eq!(cmd.ttl_ms(), u64::MAX);
         }
         _ => assert!(false),
     }
 }
 
 #[test]
-fn from_bytes_set_invalid() {
+fn from_bytes_set_with_ttl() {
+    match Command::from_bytes(&generate_buff("/set/foo/bar/2000")) {
+        Command::Set(cmd) => {
+            assert_eq!(cmd.key(), "foo");
+            assert_eq!(cmd.val(), "bar");
+            assert_eq!(cmd.ttl_ms(), 2000);
+        }
+        _ => assert!(false),
+    }
+}
+
+#[test]
+fn from_bytes_set_invalid_less_than_three_args() {
     match Command::from_bytes(&generate_buff("/set/foo")) {
+        Command::Set(cmd) => assert!(!cmd.is_valid()),
+        _ => assert!(false),
+    }
+}
+
+#[test]
+fn from_bytes_set_invalid_more_than_four_args() {
+    match Command::from_bytes(&generate_buff("/set/foo/bar/2000/1000")) {
         Command::Set(cmd) => assert!(!cmd.is_valid()),
         _ => assert!(false),
     }

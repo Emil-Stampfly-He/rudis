@@ -20,7 +20,7 @@ struct Args {
     command: String,
     key: String,
     val: Option<String>,
-    ttl: Option<u64>,
+    ttl_ms: Option<u64>,
     kv: Option<Map<String, Value>>,
 }
 
@@ -31,7 +31,7 @@ impl Args {
             command: String::from(command_type),
             key: String::from(""),
             val: None,
-            ttl: None,
+            ttl_ms: None,
             kv: None,
         }
     }
@@ -61,14 +61,14 @@ impl Command {
                 if !arg.valid {
                     return Command::Set(Set::new_invalid());
                 }
-                Command::Set(Set::from_key_val(arg.key, arg.val.unwrap(), arg.ttl.unwrap()))
+                Command::Set(Set::from_key_val(arg.key, arg.val.unwrap(), arg.ttl_ms.unwrap()))
             }
             "MULTIPLE_SET" => {
                 if !arg.valid {
                     return Command::MultipleSet(MultipleSet::new_invalid());
                 }
                 let json_kv = arg.kv.unwrap();
-                if let Some(arg) = MultipleSet::from_json_kv(json_kv, arg.ttl.unwrap()) {
+                if let Some(arg) = MultipleSet::from_json_kv(json_kv, arg.ttl_ms.unwrap()) {
                     Command::MultipleSet(arg)
                 } else {
                     Command::MultipleSet(MultipleSet::new_invalid())
@@ -97,40 +97,64 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     command: String::from("GET"),
                     key: String::from(key),
                     val: None,
-                    ttl: None,
+                    ttl_ms: None,
                     kv: None,
                 };
             }
+            // SET key value [EX]
+            // case 1: curl 'localhost:6379/set/hello/world/1000': EX 1000 ms
+            // case 2: curl 'localhost:6379/set/hello/world': EX 2^64-1 ms (never expire)
             "SET" => {
-                if all_path_vec.len() < 4
-                    || all_path_vec[1].is_empty()
-                    || all_path_vec[2].is_empty()
-                    || all_path_vec[3].is_empty()
-                    || all_path_vec.len() > 4
-                {
+                if all_path_vec.len() < 4 {
+                    if all_path_vec.len() < 3
+                        || all_path_vec[1].is_empty()
+                        || all_path_vec[2].is_empty() {
+                        return Args::new_invalid("SET");
+                    } else {
+                        return Args {
+                            valid: true,
+                            command: String::from("SET"),
+                            key: String::from(all_path_vec[1]),
+                            val: Some(String::from(all_path_vec[2])),
+                            ttl_ms: Some(u64::MAX),
+                            kv: None,
+                        };
+                    }
+                } else if all_path_vec.len() > 4 {
                     return Args::new_invalid("SET");
+                } else {
+                    if all_path_vec[1].is_empty()
+                        || all_path_vec[2].is_empty()
+                        || all_path_vec[3].is_empty() {
+                        return Args::new_invalid("SET");
+                    } else {
+                        let key = all_path_vec[1];
+                        let val = all_path_vec[2];
+                        let ttl_ms = all_path_vec[3];
+
+                        return Args {
+                            valid: true,
+                            command: String::from("SET"),
+                            key: String::from(key),
+                            val: Some(String::from(val)),
+                            ttl_ms: Some(ttl_ms.parse().unwrap()),
+                            kv: None,
+                        };
+                    }
                 }
-                let key = all_path_vec[1];
-                let val = all_path_vec[2];
-                let ttl = all_path_vec[3];
-                return Args {
-                    valid: true,
-                    command: String::from("SET"),
-                    key: String::from(key),
-                    val: Some(String::from(val)),
-                    ttl: Some(ttl.parse().unwrap()),
-                    kv: None,
-                };
             }
             _ => return Args::new_invalid("INVALID"),
         }
     } else if method == "POST" {
         // using POST request (SET ONLY) that passes kv-pair through body
-        if all_path_vec.len() != 2 {
+        // case 1: curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world"}' EX 1000 ms
+        // case 2: curl -X POST 'localhost:6379/set' -d '{"hello":"world"}' EX 2^64-1 ms (never expire)
+        if all_path_vec.len() > 2 && all_path_vec.len() < 1 {
             return Args::new_invalid("SET");
         }
+
         let body = request_buff[idx_of_body..].to_vec();
-        let ttl = all_path_vec[1];
+        let ttl_ms = if all_path_vec.len() == 2 { all_path_vec[1].parse::<u64>().unwrap() } else { u64::MAX };
         match parse_json(&body) {
             Ok(value) => {
                 if let Some(obj) = value.as_object() {
@@ -139,7 +163,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         command: String::from("MULTIPLE_SET"),
                         key: String::from(""),
                         val: None,
-                        ttl: Some(ttl.parse().unwrap()),
+                        ttl_ms: Some(ttl_ms),
                         kv: Some(obj.clone()),
                     };
                 }
@@ -160,13 +184,10 @@ fn split_on_path(input: &str) -> Vec<&str> {
 }
 
 fn parse_json(bytes: &[u8]) -> Result<Value> {
-    // log if failed to parse
-    eprintln!("BODY as text: {:?}", String::from_utf8_lossy(bytes));
     match serde_json::from_slice(bytes) {
         Ok(v) => Ok(v),
         Err(e) => {
             eprintln!("JSON parse error: {}", e);
-            eprintln!("bytes dump: {:?}", bytes);
             Err(e)
         }
     }

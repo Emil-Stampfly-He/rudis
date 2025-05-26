@@ -4,16 +4,16 @@ use serde_json::{Map, Value};
 pub struct Set {
     key: String,
     val: String,
-    ttl: u64,
+    ttl_ms: u64,
     valid: bool,
 }
 
 impl Set {
-    pub fn from_key_val(key: impl ToString, value: impl ToString, ttl: u64) -> Self {
+    pub fn from_key_val(key: impl ToString, value: impl ToString, ttl_ms: u64) -> Self {
         Set {
             key: key.to_string(),
             val: value.to_string(),
-            ttl,
+            ttl_ms,
             valid: true,
         }
     }
@@ -22,7 +22,7 @@ impl Set {
         Set {
             key: String::from(""),
             val: String::from(""),
-            ttl: 0,
+            ttl_ms: 0,
             valid: false,
         }
     }
@@ -38,15 +38,13 @@ impl Set {
     pub fn val(&self) -> &str {
         &self.val
     }
-    
-    pub fn ttl(&self) -> u64 {
-        self.ttl
-    }
+
+    pub fn ttl_ms(&self) -> u64 { self.ttl_ms }
 }
 
 pub struct MultipleSet {
     kv: Map<String, Value>,
-    ttl: u64,
+    ttl_ms: u64,
     valid: bool,
 }
 
@@ -54,7 +52,7 @@ impl MultipleSet {
     pub fn from_json_kv(obj: Map<String, Value>, ttl: u64) -> Option<Self> {
         Some(MultipleSet {
             kv: obj,
-            ttl,
+            ttl_ms: ttl,
             valid: true,
         })
     }
@@ -62,7 +60,7 @@ impl MultipleSet {
     pub fn new_invalid() -> Self {
         MultipleSet {
             kv: Map::new(),
-            ttl: 0,
+            ttl_ms: 0,
             valid: false,
         }
     }
@@ -74,8 +72,6 @@ impl MultipleSet {
     pub fn kv(&self) -> &Map<String, Value> {
         &self.kv
     }
-    
-    pub fn ttl(&self) -> u64 {
-        self.ttl
-    }
+
+    pub fn ttl_ms(&self) -> u64 { self.ttl_ms }
 }
