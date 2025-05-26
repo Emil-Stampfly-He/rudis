@@ -1,5 +1,5 @@
 # Rudis
-A mini version of redis server that provides http interface implemented in Rust. The in-memorry kv-storage is sharded and concurrent safe. Inspired by [Tokio's tutorial](https://tokio.rs/tokio/tutorial) and [Webdis](https://github.com/nicolasff/webdis)
+A mini version of redis server that provides http interface implemented in Rust. The in-memory kv-storage is sharded and concurrent safe. Inspired by [Tokio's tutorial](https://tokio.rs/tokio/tutorial) and [Webdis](https://github.com/nicolasff/webdis)
 
 This is a still work-in-progress project and is not meant to be used in production(yet). Only basic commands like GET and SET are supported. More commands will be added in the future.
 
@@ -26,7 +26,7 @@ And the server will be listening on the port you specified or `127.0.0.1:6379` b
 Once the server is up and running, its service can be accessed via http GET request. The following are the supported requests:
 ```
 GET: <your-url>/GET/<key> 
-SET: <your-url>/SET/<key>/<value>/<ttl>
+SET: <your-url>/SET/<key>/<value>[/<ttl>]
 ```
 The response will be in json format. For a SET, you will be getting the status of this command like
 ```sh
@@ -34,24 +34,30 @@ The response will be in json format. For a SET, you will be getting the status o
 $ curl 'localhost:6379/set/hello/world/1000'
 {"SET": "OK"}
 
+# no ttl specified, never expire
+$ curl 'localhost:6379/set/hello/world'
+{"SET": "OK"}
+
 # or if SET's arguments are not correct
 $ curl 'localhost:6379/set/hello'
-{"SET": "Invalid"}
-
-# invalid because ttl have to be specified
-$ curl 'localhost:6379/set/hello/world'
 {"SET": "Invalid"}
 ```
 You can also send a POST request with json as key value pair to support a SET command.
 ```sh
+# set ttl to be 1000 ms
 $ curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world"}'
+{"SET": "OK"}
+
+# for multiple kv pairs that never expire
+$ curl -X POST 'localhost:6379/set' -d '{"hello":"world", "foo":"bar"}'
+{"SET": "OK"}
+
+# set ttl to be 1000 ms for every entry
+$ curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world", "foo":"bar"}'
 {"SET": "OK"}
 
 $ curl -X POST 'localhost:6379/set' -d '{}'
 {"SET": "Invalid"}
-# for multiple kv pairs
-$ curl -X POST 'localhost:6379/set/1000' -d '{"hello":"world", "foo":"bar"}'
-{"SET": "OK}
 ```
 and for get, you will be getting the key value pair if there's a match, or an empty json object if there's no match
 ```sh
@@ -69,4 +75,4 @@ $ curl 'localhost:6379/GET'
 Any other types of commands will be responded with an empty json object
 
 ## Contribute
-Refer to the issues section to see what are the current roadmap / TODO for this project. Be sure to follow Github's [Code of Conduct](https://docs.github.com/en/site-policy/github-terms/github-community-code-of-conduct) and thanks for your contribution!
+Refer to the issues section to see what are the current roadmap / TODO for this project. Be sure to follow GitHub's [Code of Conduct](https://docs.github.com/en/site-policy/github-terms/github-community-code-of-conduct) and thanks for your contribution!
