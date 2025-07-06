@@ -1,17 +1,20 @@
 mod get;
 
-use std::hash::{Hash, Hasher};
 pub use get::Get;
 
 mod set;
+mod del;
+
 use httparse::Request;
 use serde_json::{Map, Result, Value};
 pub use set::{MultipleSet, Set};
+use crate::command::del::Del;
 
 pub enum Command {
     Set(Set),
     Get(Get),
     MultipleSet(MultipleSet),
+    Del(Del),
     Invalid,
 }
 
@@ -34,26 +37,6 @@ impl Args {
             val: None,
             ttl_ms: None,
             kv: None,
-        }
-    }
-}
-
-impl Hash for Args {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.valid.hash(state);
-        self.command.hash(state);
-        self.key.hash(state);
-        self.val.hash(state);
-        self.ttl_ms.hash(state);
-        
-        if let Some(ref map) = self.kv {
-            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-            entries.sort_by(|a, b| a.0.cmp(b.0));
-
-            for (k, v) in entries {
-                k.hash(state);
-                v.to_string().hash(state);
-            }
         }
     }
 }
@@ -94,6 +77,12 @@ impl Command {
                 } else {
                     Command::MultipleSet(MultipleSet::new_invalid())
                 }
+            }
+            "DEL" => {
+                if !arg.valid {
+                    return Command::Del(Del::new_invalid());
+                }
+                Command::Del(Del::from_key(arg.key))
             }
             _ => Command::Invalid,
         }
@@ -162,6 +151,22 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             kv: None,
                         };
                     }
+                }
+            }
+            // DEL key
+            // curl 'localhost:6379/del/hello'
+            "DEL" => {
+                if all_path_vec.len() != 2 {
+                    return Args::new_invalid("DEL");
+                }
+                let key = all_path_vec[1];
+                return Args {
+                    valid: true,
+                    command: String::from("DEL"),
+                    key: String::from(key),
+                    val: None,
+                    ttl_ms: None,
+                    kv: None,
                 }
             }
             _ => return Args::new_invalid("INVALID"),
