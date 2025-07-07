@@ -183,18 +183,28 @@ async fn process(socket: TcpStream, db: ShardedDb) {
             }
             Command::Del(cmd) => {
                 if cmd.is_valid() {
-                    let idx = hash_key(cmd.key()) % db.len();
-                    
-                    {
-                        let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        expire_map.remove(cmd.key());
-                    }
-
-                    let mut db = db[idx].lock().unwrap();
-                    if let Some(_) = db.remove(cmd.key()) {
-                        Bytes::copy_from_slice(b"{\"DEL\": \"OK\"}")
+                    if cmd.key_list().len() >= 1 {
+                        let mut deleted_count = 0;
+                        
+                        {
+                            let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                            expire_map.retain(|key, _| {
+                                cmd.key_list().contains(key)
+                            });
+                        }
+                        
+                        for key in cmd.key_list() {
+                            let idx = hash_key(&*key) % db.len();
+                            let mut db = db[idx].lock().unwrap();
+                            if db.remove(&*key).is_some() {
+                                deleted_count += 1;
+                            }
+                        }
+                        
+                        let response = format!("DEL: {} REMOVED", deleted_count);
+                        Bytes::copy_from_slice(response.as_bytes())
                     } else {
-                        Bytes::copy_from_slice(b"{\"DEL\": \"NULL\"}")
+                        Bytes::copy_from_slice(b"{\"DEL\": \"0 REMOVED\"}")
                     }
                 } else {
                     Bytes::copy_from_slice(b"{\"DEL\": \"Invalid \"}")

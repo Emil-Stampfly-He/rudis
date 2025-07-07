@@ -1,14 +1,15 @@
-#[derive(Debug)]
 pub struct Del {
     key: String,
     valid: bool,
+    key_list: Vec<String>
 }
 
 impl Del {
-    pub fn from_key(key: impl ToString) -> Self {
+    pub fn from_key_list(key_list: Vec<String>) -> Self {
         Del {
-            key: key.to_string(),
+            key: String::from(""),
             valid: true,
+            key_list
         }
     }
     
@@ -16,6 +17,7 @@ impl Del {
         Del {
             key: String::from(""),
             valid: false,
+            key_list: Vec::new()
         }
     }
     
@@ -25,5 +27,9 @@ impl Del {
    
     pub fn key(&self) -> &str {
         &self.key
+    }
+    
+    pub fn key_list(&self) -> Vec<String> {
+        self.key_list.clone()
     }
 }

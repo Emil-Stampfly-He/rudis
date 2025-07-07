@@ -26,6 +26,7 @@ struct Args {
     val: Option<String>,
     ttl_ms: Option<u64>,
     kv: Option<Map<String, Value>>,
+    key_list: Option<Vec<String>>,
 }
 
 impl Args {
@@ -37,6 +38,7 @@ impl Args {
             val: None,
             ttl_ms: None,
             kv: None,
+            key_list: None,
         }
     }
 }
@@ -82,7 +84,7 @@ impl Command {
                 if !arg.valid {
                     return Command::Del(Del::new_invalid());
                 }
-                Command::Del(Del::from_key(arg.key))
+                Command::Del(Del::from_key_list(arg.key_list.unwrap()))
             }
             _ => Command::Invalid,
         }
@@ -109,6 +111,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     val: None,
                     ttl_ms: None,
                     kv: None,
+                    key_list: None,
                 };
             }
             // SET key value [EX]
@@ -128,6 +131,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             val: Some(String::from(all_path_vec[2])),
                             ttl_ms: Some(u64::MAX),
                             kv: None,
+                            key_list: None,
                         };   
                     }
                 } else if all_path_vec.len() > 4 {
@@ -149,24 +153,32 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             val: Some(String::from(val)),
                             ttl_ms: Some(ttl_ms.parse().unwrap()),
                             kv: None,
+                            key_list: None,
                         };
                     }
                 }
             }
             // DEL key
-            // curl 'localhost:6379/del/hello'
+            // case 1: curl 'localhost:6379/del/hello'
+            // case 2: curl 'localhost:6379/del/hello/foo/...'
             "DEL" => {
-                if all_path_vec.len() != 2 {
+                if all_path_vec.len() < 2 {
                     return Args::new_invalid("DEL");
-                }
-                let key = all_path_vec[1];
-                return Args {
-                    valid: true,
-                    command: String::from("DEL"),
-                    key: String::from(key),
-                    val: None,
-                    ttl_ms: None,
-                    kv: None,
+                } else {
+                    let key_list: Vec<String>= all_path_vec
+                        .iter()
+                        .map(|key| { key.to_string() })
+                        .skip(1)
+                        .collect();
+                    return Args {
+                        valid: true,
+                        command: String::from("DEL"),
+                        key: String::from(""),
+                        val: None,
+                        ttl_ms: None,
+                        kv: None,
+                        key_list: Some(key_list),
+                    }
                 }
             }
             _ => return Args::new_invalid("INVALID"),
@@ -191,6 +203,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         val: None,
                         ttl_ms: Some(ttl_ms),
                         kv: Some(obj.clone()),
+                        key_list: None,
                     };
                 }
                 return Args::new_invalid("SET");
