@@ -15,6 +15,7 @@ pub enum Command {
     Get(Get),
     MultipleSet(MultipleSet),
     Del(Del),
+    GetDel(Get, Del),
     Invalid,
 }
 
@@ -85,6 +86,14 @@ impl Command {
                     return Command::Del(Del::new_invalid());
                 }
                 Command::Del(Del::from_key_list(arg.key_list.unwrap()))
+            }
+            "GETDEL" => {
+                if !arg.valid {
+                    return Command::GetDel(Get::new_invalid(), Del::new_invalid());
+                }
+                let get = Get::from_key(arg.key);
+                let del = Del::from_key_list(arg.key_list.unwrap());
+                Command::GetDel(get, del)
             }
             _ => Command::Invalid,
         }
@@ -174,6 +183,29 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         valid: true,
                         command: String::from("DEL"),
                         key: String::from(""),
+                        val: None,
+                        ttl_ms: None,
+                        kv: None,
+                        key_list: Some(key_list),
+                    }
+                }
+            }
+            // GETDEL key
+            // curl 'localhost:6379/getdel/hello'
+            "GETDEL" => {
+                if all_path_vec.len() != 2 {
+                    return Args::new_invalid("GETDEL");
+                } else {
+                    let key_list: Vec<String>= all_path_vec
+                        .iter()
+                        .map(|key| { key.to_string() })
+                        .skip(1)
+                        .collect();
+                    let key = &key_list[0];
+                    return Args {
+                        valid: true,
+                        command: String::from("GETDEL"),
+                        key: key.clone(),
                         val: None,
                         ttl_ms: None,
                         kv: None,

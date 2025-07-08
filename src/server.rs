@@ -115,6 +115,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     // fixed lock order: lock EXPIRE_MAP first, then lock sharded db
                     let now = current_unix_timestamp();
                     let idx = hash_key(cmd.key()) % db.len();
+                    
                     {
                         let mut expire_map = EXPIRE_MAP.lock().unwrap();
                         if let Some(&(created_time, ttl_ms)) = expire_map.get(cmd.key()) {
@@ -208,6 +209,47 @@ async fn process(socket: TcpStream, db: ShardedDb) {
                     }
                 } else {
                     Bytes::copy_from_slice(b"{\"DEL\": \"Invalid \"}")
+                }
+            }
+            Command::GetDel(get_cmd, del_cmd) => {
+                if get_cmd.is_valid() && del_cmd.is_valid() {
+                    let now = current_unix_timestamp();
+                    let idx = hash_key(get_cmd.key()) % db.len();
+                    {
+                        let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                        if let Some(&(created_time, ttl_ms)) = expire_map.get(get_cmd.key()) {
+                            if ttl_ms != u64::MAX && created_time + ttl_ms < now {
+                                expire_map.remove(get_cmd.key());
+                                drop(expire_map); // prevent nested lock
+                                
+                                let mut db = db[idx].lock().unwrap();
+                                db.remove(get_cmd.key());
+                            }
+                        }
+                    }
+
+                    // get value from db
+                    let mut db = db[idx].lock().unwrap();
+                    let response = if let Some(value) = db.get(get_cmd.key()) {
+                        let value_string = str::from_utf8(value).unwrap();
+                        format!("{{\"{}\":\"{}\"}} : REMOVED", get_cmd.key(), value_string)
+                    } else {
+                        String::from("{}")
+                    };
+                    
+                    // delete keys in del_cmd
+                    for key in del_cmd.key_list() {
+                        {
+                            let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                            expire_map.remove(&*key);
+                        }
+
+                        db.remove(&*key);
+                    }
+
+                    Bytes::copy_from_slice(response.as_bytes())
+                } else {
+                    Bytes::copy_from_slice(b"{\"GETDEL\": \"Invalid \"}")
                 }
             }
             Command::Invalid => Bytes::copy_from_slice(b"{}"),
