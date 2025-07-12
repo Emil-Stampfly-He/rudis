@@ -5,6 +5,7 @@ pub use get::Get;
 mod set;
 mod del;
 mod hset;
+mod hget;
 
 use httparse::Request;
 use serde_json::{Map, Result, Value};
@@ -27,6 +28,7 @@ struct Args {
     valid: bool,
     command: String,
     key: String,
+    field: String,
     val: Option<String>,
     ttl_ms: Option<u64>,
     kv: Option<Map<String, Value>>,
@@ -39,6 +41,7 @@ impl Args {
             valid: false,
             command: String::from(command_type),
             key: String::from(""),
+            field: String::from(""),
             val: None,
             ttl_ms: None,
             kv: None,
@@ -132,6 +135,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     valid: true,
                     command: String::from("GET"),
                     key: String::from(key),
+                    field: String::from(""),
                     val: None,
                     ttl_ms: None,
                     kv: None,
@@ -152,6 +156,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             valid: true,
                             command: String::from("SET"),
                             key: String::from(all_path_vec[1]),
+                            field: String::from(""),
                             val: Some(String::from(all_path_vec[2])),
                             ttl_ms: Some(u64::MAX),
                             kv: None,
@@ -174,6 +179,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             valid: true,
                             command: String::from("SET"),
                             key: String::from(key),
+                            field: String::from(""),
                             val: Some(String::from(val)),
                             ttl_ms: Some(ttl_ms.parse().unwrap()),
                             kv: None,
@@ -198,6 +204,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         valid: true,
                         command: String::from("DEL"),
                         key: String::from(""),
+                        field: String::from(""),
                         val: None,
                         ttl_ms: None,
                         kv: None,
@@ -221,6 +228,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         valid: true,
                         command: String::from("GETDEL"),
                         key: key.clone(),
+                        field: String::from(""),
                         val: None,
                         ttl_ms: None,
                         kv: None,
@@ -266,6 +274,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         valid: true,
                         command: String::from("HSET"),
                         key,
+                        field: String::from(""),
                         val: None,
                         ttl_ms: Option::from(u64::MAX),
                         kv: Option::from(fv_map),
@@ -304,6 +313,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         valid: true,
                         command: String::from("HSET"),
                         key,
+                        field: String::from(""),
                         val: None,
                         ttl_ms: Option::from(ttl_ms),
                         kv: Option::from(fv_map),
@@ -330,6 +340,7 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         valid: true,
                         command: String::from("MULTIPLE_SET"),
                         key: String::from(""),
+                        field: String::from(""),
                         val: None,
                         ttl_ms: Some(ttl_ms),
                         kv: Some(obj.clone()),
