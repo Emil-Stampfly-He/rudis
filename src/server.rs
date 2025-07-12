@@ -17,7 +17,12 @@ static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<String, (u64, u64)>>>> = LazyLock:
     Arc::new(Mutex::new(HashMap::new()))
 });
 
-type ShardedDb = Arc<Vec<CachePadded<Mutex<HashMap<String, Bytes>>>>>;
+pub enum DbValue {
+    String(Bytes),
+    HashMap(HashMap<String, Bytes>),
+}
+
+type ShardedDb = Arc<Vec<CachePadded<Mutex<HashMap<String, DbValue>>>>>;
 
 pub struct Server {
     addr: SocketAddr,
@@ -146,7 +151,7 @@ fn handle_get(cmd: Get, db: &ShardedDb) -> Bytes {
         }
 
         let db = db[idx].lock().unwrap();
-        if let Some(value) = db.get(cmd.key()) {
+        if let Some(DbValue::String(value)) = db.get(cmd.key()) {
             let value_string = std::str::from_utf8(value).unwrap();
             Bytes::from(format!("{{\"{}\":\"{}\"}}", cmd.key(), value_string))
         } else {
@@ -164,12 +169,10 @@ fn handle_set(cmd: Set, db: &ShardedDb) -> Bytes {
 
     let idx = hash_key(cmd.key()) % db.len();
     let mut shard = db[idx].lock().unwrap();
+    let db_value = DbValue::String(Bytes::copy_from_slice(cmd.val().as_bytes()));
 
     // insert into expire_map
-    shard.insert(
-        cmd.key().to_string(),
-        Bytes::copy_from_slice(cmd.val().as_bytes()),
-    );
+    shard.insert(cmd.key().to_string(), db_value);
 
     {
         let mut expire_map = EXPIRE_MAP.lock().unwrap();
@@ -184,11 +187,9 @@ fn handle_multiple_set(cmd: MultipleSet, db: &ShardedDb) -> Bytes {
         for (key, val) in cmd.kv().iter() {
             let idx: usize = hash_key(key) % db.len();
             let mut db = db[idx].lock().unwrap();
+            let db_value = DbValue::String(Bytes::copy_from_slice(val.as_str().unwrap().to_string().as_bytes()));
 
-            db.insert(
-                key.to_string(),
-                Bytes::copy_from_slice(val.as_str().unwrap().to_string().as_bytes()),
-            );
+            db.insert(key.to_string(), db_value);
 
             {
                 let mut expire_map = EXPIRE_MAP.lock().unwrap();
@@ -250,7 +251,7 @@ fn handle_getdel(get_cmd: Get, del_cmd: Del, db: &ShardedDb) -> Bytes {
 
         // get value from db
         let mut db = db[idx].lock().unwrap();
-        let response = if let Some(value) = db.get(get_cmd.key()) {
+        let response = if let Some(DbValue::String(value)) = db.get(get_cmd.key()) {
             let value_string = str::from_utf8(value).unwrap();
             format!("{{\"{}\":\"{}\"}} : REMOVED", get_cmd.key(), value_string)
         } else {
