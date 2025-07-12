@@ -276,25 +276,22 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     let key = rest_path_vec[0].clone();
                     let mut field_vec: Vec<String> = vec![];
                     let mut value_vec: Vec<Value> = vec![];
-                    let mut ttl_ms: u64 = 0;
+                    let ttl_ms: u64;
 
-                    for (idx, item) in rest_path_vec[1..].iter().enumerate() {
-                        // The last item is ttl
-                        if idx == rest_path_vec.len() - 2 {
-                            match item.parse::<u64>() {
-                                Ok(val) => ttl_ms = val,
-                                Err(_e) => {
-                                    return Args::new_invalid("HSET");
-                                }
-                            }
-                        }
+                    let ttl_str = rest_path_vec.last().unwrap();
+                    match ttl_str.parse::<u64>() {
+                        Ok(val) => ttl_ms = val,
+                        Err(_) => return Args::new_invalid("HSET"),
+                    }
 
+                    for (idx, item) in rest_path_vec[1..rest_path_vec.len() - 1].iter().enumerate() {
                         if idx % 2 == 0 {
                             field_vec.push(item.clone());
                         } else {
                             value_vec.push(item.as_str().into());
                         }
                     }
+
                     assert_eq!(field_vec.len(), value_vec.len());
 
                     let mut fv_map = Map::new();

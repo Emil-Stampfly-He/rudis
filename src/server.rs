@@ -9,6 +9,7 @@ use std::str;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use rand::seq::IteratorRandom;
+use serde_json::{Map, Value};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::interval;
 
@@ -19,7 +20,7 @@ static EXPIRE_MAP: LazyLock<Arc<Mutex<HashMap<String, (u64, u64)>>>> = LazyLock:
 
 pub enum DbValue {
     String(Bytes),
-    HashMap(HashMap<String, Bytes>),
+    Hash(Map<String, Value>),
 }
 
 type ShardedDb = Arc<Vec<CachePadded<Mutex<HashMap<String, DbValue>>>>>;
@@ -280,7 +281,22 @@ fn handle_getdel(get_cmd: Get, del_cmd: Del, db: &ShardedDb) -> Bytes {
 }
 
 fn handle_hset(cmd: HSet, db: &ShardedDb) -> Bytes {
-    todo!()
+    if !cmd.is_valid() {
+        return Bytes::copy_from_slice(b"{\"HSET\": \"Invalid \"}");
+    }
+
+    let idx = hash_key(cmd.key()) % db.len();
+    let mut shard = db[idx].lock().unwrap();
+    let db_value = DbValue::Hash(cmd.kv().clone());
+
+    shard.insert(cmd.key().to_string(), db_value);
+
+    {
+        let mut expire_map = EXPIRE_MAP.lock().unwrap();
+        expire_map.insert(cmd.key().to_string(), (current_unix_timestamp(), cmd.ttl_ms()));
+    }
+
+    Bytes::copy_from_slice(b"{\"HSET\": \"OK\"}")
 }
 
 fn current_unix_timestamp() -> u64 {
