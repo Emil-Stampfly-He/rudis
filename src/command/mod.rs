@@ -6,6 +6,7 @@ mod set;
 mod del;
 mod hset;
 mod hget;
+mod hgetall;
 
 use httparse::Request;
 use serde_json::{Map, Result, Value};
@@ -13,6 +14,7 @@ pub use set::{MultipleSet, Set};
 pub use del::Del;
 pub use hset::HSet;
 pub use hget::HGet;
+pub use hgetall::HGetAll;
 
 pub enum Command {
     Set(Set),
@@ -22,6 +24,7 @@ pub enum Command {
     GetDel(Get, Del),
     HSet(HSet),
     HGet(HGet),
+    HGetAll(HGetAll),
     Invalid,
 }
 
@@ -120,6 +123,12 @@ impl Command {
                     return Command::HGet(HGet::new_invalid());
                 }
                 Command::HGet(HGet::from_key_field(arg.key, arg.field))
+            }
+            "HGETALL" => {
+                if !arg.valid {
+                    return Command::HGetAll(HGetAll::new_invalid());
+                }
+                Command::HGetAll(HGetAll::from_key(arg.key))
             }
             _ => Command::Invalid,
         }
@@ -335,15 +344,34 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                 if all_path_vec.len() != 3 {
                     return Args::new_invalid("HGET");
                 }
-                
+
                 let key = all_path_vec[1].to_string();
                 let field = all_path_vec[2].to_string();
-                
+
                 return Args {
                     valid: true,
                     command: String::from("HGET"),
                     key,
                     field,
+                    val: None,
+                    ttl_ms: None,
+                    kv: None,
+                    key_list: None,
+                }
+            }
+            // HGET key field
+            // curl 'localhost:6379/hgetall/key'
+            "HGETALL" => {
+                if all_path_vec.len() != 2 {
+                    return Args::new_invalid("HGETALL");
+                }
+
+                let key = all_path_vec[1].to_string();
+                return Args {
+                    valid: true,
+                    command: String::from("HGETALL"),
+                    key,
+                    field: String::from(""),
                     val: None,
                     ttl_ms: None,
                     kv: None,
