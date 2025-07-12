@@ -1,4 +1,4 @@
-use crate::command::Command;
+use crate::command::{Command, Del, Get, HSet, MultipleSet, Set};
 use crate::connection::Connection;
 use bytes::Bytes;
 use crossbeam_utils::CachePadded;
@@ -109,149 +109,12 @@ async fn process(socket: TcpStream, db: ShardedDb) {
         };
 
         let response: Bytes = match Command::from_bytes(&buff) {
-            Command::Get(cmd) => {
-                if cmd.is_valid() {
-                    // lazy deletion from EXPIRE_MAP & db if expired
-                    // fixed lock order: lock EXPIRE_MAP first, then lock sharded db
-                    let now = current_unix_timestamp();
-                    let idx = hash_key(cmd.key()) % db.len();
-                    
-                    {
-                        let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        if let Some(&(created_time, ttl_ms)) = expire_map.get(cmd.key()) {
-                            if ttl_ms != u64::MAX && created_time + ttl_ms < now {
-                                expire_map.remove(cmd.key());
-                                drop(expire_map); // prevent nested lock
-                                
-                                let mut db = db[idx].lock().unwrap();
-                                db.remove(cmd.key());
-                            }
-                        }
-                    }
-                    
-                    let db = db[idx].lock().unwrap();
-                    if let Some(value) = db.get(cmd.key()) {
-                        let value_string = std::str::from_utf8(value).unwrap();
-                        Bytes::from(format!("{{\"{}\":\"{}\"}}", cmd.key(), value_string))
-                    } else {
-                        Bytes::copy_from_slice(b"{}")
-                    }
-                } else {
-                    Bytes::copy_from_slice(b"{\"GET\": \"Invalid \"}")
-                }
-            }
-            Command::Set(cmd) => {
-                if cmd.is_valid() {
-                    let idx: usize = hash_key(cmd.key()) % db.len();
-                    let mut db = db[idx].lock().unwrap();
-
-                    db.insert(
-                        cmd.key().to_string(),
-                        Bytes::copy_from_slice(cmd.val().as_bytes()),
-                    );
-
-                    // insert into expire_map
-                    {
-                        let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        expire_map.insert(cmd.key().to_string(), (current_unix_timestamp(), cmd.ttl_ms()));
-                    }
-
-                    Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
-                } else {
-                    Bytes::copy_from_slice(b"{\"SET\": \"Invalid \"}")
-                }
-            }
-            Command::MultipleSet(cmd) => {
-                if cmd.is_valid() {
-                    for (key, val) in cmd.kv().iter() {
-                        let idx: usize = hash_key(key) % db.len();
-                        let mut db = db[idx].lock().unwrap();
-
-                        db.insert(
-                            key.to_string(),
-                            Bytes::copy_from_slice(val.as_str().unwrap().to_string().as_bytes()),
-                        );
-                        
-                        {
-                            let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                            expire_map.insert(key.clone(), (current_unix_timestamp(), cmd.ttl_ms()));
-                        }
-                    }
-                    Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
-                } else {
-                    Bytes::copy_from_slice(b"{\"SET\": \"Invalid \"}")
-                }
-            }
-            Command::Del(cmd) => {
-                if cmd.is_valid() {
-                    if cmd.key_list().len() >= 1 {
-                        let mut deleted_count = 0;
-                        
-                        {
-                            let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                            expire_map.retain(|key, _| {
-                                cmd.key_list().contains(key)
-                            });
-                        }
-                        
-                        for key in cmd.key_list() {
-                            let idx = hash_key(&*key) % db.len();
-                            let mut db = db[idx].lock().unwrap();
-                            if db.remove(&*key).is_some() {
-                                deleted_count += 1;
-                            }
-                        }
-                        
-                        let response = format!("DEL: {} REMOVED", deleted_count);
-                        Bytes::copy_from_slice(response.as_bytes())
-                    } else {
-                        Bytes::copy_from_slice(b"{\"DEL\": \"0 REMOVED\"}")
-                    }
-                } else {
-                    Bytes::copy_from_slice(b"{\"DEL\": \"Invalid \"}")
-                }
-            }
-            Command::GetDel(get_cmd, del_cmd) => {
-                if get_cmd.is_valid() && del_cmd.is_valid() {
-                    let now = current_unix_timestamp();
-                    let idx = hash_key(get_cmd.key()) % db.len();
-                    {
-                        let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                        if let Some(&(created_time, ttl_ms)) = expire_map.get(get_cmd.key()) {
-                            if ttl_ms != u64::MAX && created_time + ttl_ms < now {
-                                expire_map.remove(get_cmd.key());
-                                drop(expire_map); // prevent nested lock
-                                
-                                let mut db = db[idx].lock().unwrap();
-                                db.remove(get_cmd.key());
-                            }
-                        }
-                    }
-
-                    // get value from db
-                    let mut db = db[idx].lock().unwrap();
-                    let response = if let Some(value) = db.get(get_cmd.key()) {
-                        let value_string = str::from_utf8(value).unwrap();
-                        format!("{{\"{}\":\"{}\"}} : REMOVED", get_cmd.key(), value_string)
-                    } else {
-                        String::from("{}")
-                    };
-                    
-                    // delete keys in del_cmd
-                    for key in del_cmd.key_list() {
-                        {
-                            let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                            expire_map.remove(&*key);
-                        }
-
-                        db.remove(&*key);
-                    }
-
-                    Bytes::copy_from_slice(response.as_bytes())
-                } else {
-                    Bytes::copy_from_slice(b"{\"GETDEL\": \"Invalid \"}")
-                }
-            }
+            Command::Get(cmd) => handle_get(cmd, &db),
+            Command::Set(cmd) => handle_set(cmd, &db),
+            Command::MultipleSet(cmd) => handle_multiple_set(cmd, &db),
+            Command::Del(cmd) => handle_del(cmd, &db),
+            Command::GetDel(get_cmd, del_cmd) => handle_getdel(get_cmd, del_cmd, &db),
+            Command::HSet(cmd) => handle_hset(cmd, &db),
             Command::Invalid => Bytes::copy_from_slice(b"{}"),
         };
 
@@ -260,6 +123,158 @@ async fn process(socket: TcpStream, db: ShardedDb) {
             return;
         }
     }
+}
+
+fn handle_get(cmd: Get, db: &ShardedDb) -> Bytes {
+    if cmd.is_valid() {
+        // lazy deletion from EXPIRE_MAP & db if expired
+        // fixed lock order: lock EXPIRE_MAP first, then lock sharded db
+        let now = current_unix_timestamp();
+        let idx = hash_key(cmd.key()) % db.len();
+
+        {
+            let mut expire_map = EXPIRE_MAP.lock().unwrap();
+            if let Some(&(created_time, ttl_ms)) = expire_map.get(cmd.key()) {
+                if ttl_ms != u64::MAX && created_time + ttl_ms < now {
+                    expire_map.remove(cmd.key());
+                    drop(expire_map); // prevent nested lock
+
+                    let mut db = db[idx].lock().unwrap();
+                    db.remove(cmd.key());
+                }
+            }
+        }
+
+        let db = db[idx].lock().unwrap();
+        if let Some(value) = db.get(cmd.key()) {
+            let value_string = std::str::from_utf8(value).unwrap();
+            Bytes::from(format!("{{\"{}\":\"{}\"}}", cmd.key(), value_string))
+        } else {
+            Bytes::copy_from_slice(b"{}")
+        }
+    } else {
+        Bytes::copy_from_slice(b"{\"GET\": \"Invalid \"}")
+    }
+}
+
+fn handle_set(cmd: Set, db: &ShardedDb) -> Bytes {
+    if !cmd.is_valid() {
+        return Bytes::copy_from_slice(b"{\"SET\": \"Invalid \"}");
+    }
+
+    let idx = hash_key(cmd.key()) % db.len();
+    let mut shard = db[idx].lock().unwrap();
+
+    // insert into expire_map
+    shard.insert(
+        cmd.key().to_string(),
+        Bytes::copy_from_slice(cmd.val().as_bytes()),
+    );
+
+    {
+        let mut expire_map = EXPIRE_MAP.lock().unwrap();
+        expire_map.insert(cmd.key().to_string(), (current_unix_timestamp(), cmd.ttl_ms()));
+    }
+
+    Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
+}
+
+fn handle_multiple_set(cmd: MultipleSet, db: &ShardedDb) -> Bytes {
+    if cmd.is_valid() {
+        for (key, val) in cmd.kv().iter() {
+            let idx: usize = hash_key(key) % db.len();
+            let mut db = db[idx].lock().unwrap();
+
+            db.insert(
+                key.to_string(),
+                Bytes::copy_from_slice(val.as_str().unwrap().to_string().as_bytes()),
+            );
+
+            {
+                let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                expire_map.insert(key.clone(), (current_unix_timestamp(), cmd.ttl_ms()));
+            }
+        }
+        Bytes::copy_from_slice(b"{\"SET\": \"OK\"}")
+    } else {
+        Bytes::copy_from_slice(b"{\"SET\": \"Invalid \"}")
+    }
+}
+
+fn handle_del(cmd: Del, db: &ShardedDb) -> Bytes {
+    if cmd.is_valid() {
+        if cmd.key_list().len() >= 1 {
+            let mut deleted_count = 0;
+
+            {
+                let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                expire_map.retain(|key, _| {
+                    cmd.key_list().contains(key)
+                });
+            }
+
+            for key in cmd.key_list() {
+                let idx = hash_key(&*key) % db.len();
+                let mut db = db[idx].lock().unwrap();
+                if db.remove(&*key).is_some() {
+                    deleted_count += 1;
+                }
+            }
+
+            let response = format!("DEL: {} REMOVED", deleted_count);
+            Bytes::copy_from_slice(response.as_bytes())
+        } else {
+            Bytes::copy_from_slice(b"{\"DEL\": \"0 REMOVED\"}")
+        }
+    } else {
+        Bytes::copy_from_slice(b"{\"DEL\": \"Invalid \"}")
+    }
+}
+
+fn handle_getdel(get_cmd: Get, del_cmd: Del, db: &ShardedDb) -> Bytes {
+    if get_cmd.is_valid() && del_cmd.is_valid() {
+        let now = current_unix_timestamp();
+        let idx = hash_key(get_cmd.key()) % db.len();
+        {
+            let mut expire_map = EXPIRE_MAP.lock().unwrap();
+            if let Some(&(created_time, ttl_ms)) = expire_map.get(get_cmd.key()) {
+                if ttl_ms != u64::MAX && created_time + ttl_ms < now {
+                    expire_map.remove(get_cmd.key());
+                    drop(expire_map); // prevent nested lock
+
+                    let mut db = db[idx].lock().unwrap();
+                    db.remove(get_cmd.key());
+                }
+            }
+        }
+
+        // get value from db
+        let mut db = db[idx].lock().unwrap();
+        let response = if let Some(value) = db.get(get_cmd.key()) {
+            let value_string = str::from_utf8(value).unwrap();
+            format!("{{\"{}\":\"{}\"}} : REMOVED", get_cmd.key(), value_string)
+        } else {
+            String::from("{}")
+        };
+
+        // delete keys in del_cmd
+        for key in del_cmd.key_list() {
+            {
+                let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                expire_map.remove(&*key);
+            }
+
+            db.remove(&*key);
+        }
+
+        Bytes::copy_from_slice(response.as_bytes())
+    } else {
+        Bytes::copy_from_slice(b"{\"GETDEL\": \"Invalid \"}")
+    }
+}
+
+fn handle_hset(cmd: HSet, db: &ShardedDb) -> Bytes {
+    todo!()
 }
 
 fn current_unix_timestamp() -> u64 {

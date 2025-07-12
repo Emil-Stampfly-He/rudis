@@ -4,11 +4,13 @@ pub use get::Get;
 
 mod set;
 mod del;
+mod hset;
 
 use httparse::Request;
 use serde_json::{Map, Result, Value};
 pub use set::{MultipleSet, Set};
-use crate::command::del::Del;
+pub use del::Del;
+pub use hset::HSet;
 
 pub enum Command {
     Set(Set),
@@ -16,6 +18,7 @@ pub enum Command {
     MultipleSet(MultipleSet),
     Del(Del),
     GetDel(Get, Del),
+    HSet(HSet),
     Invalid,
 }
 
@@ -94,6 +97,18 @@ impl Command {
                 let get = Get::from_key(arg.key);
                 let del = Del::from_key_list(arg.key_list.unwrap());
                 Command::GetDel(get, del)
+            }
+            "HSET" => {
+                if !arg.valid {
+                    return Command::HSet(HSet::new_invalid());
+                }
+                let kv = arg.kv.unwrap();
+                let key = arg.key;
+                if let Some(arg) = HSet::from_json_kv(key, kv, arg.ttl_ms.unwrap()) {
+                    Command::HSet(arg)
+                } else { 
+                    Command::HSet(HSet::new_invalid())
+                }
             }
             _ => Command::Invalid,
         }
@@ -210,6 +225,92 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         ttl_ms: None,
                         kv: None,
                         key_list: Some(key_list),
+                    }
+                }
+            }
+            // HSET key field1 value1 [field2 value2 ...] [EX]
+            // case 1: curl 'localhost:6379/hset/key/field1/value1'
+            // case 2: curl 'localhost:6379/hset/key/field1/value1/field2/value2'
+            // case 3: curl 'localhost:6379/hset/key/field1/value1/field2/value2/1000'
+            "HSET" => {
+                if all_path_vec.len() < 4 {
+                    return Args::new_invalid("HSET");
+                }
+
+                let rest_path_vec: Vec<String> = all_path_vec.iter()
+                    .map(|key| { key.to_string() })
+                    .skip(1)
+                    .collect();
+                // no expiration time specified, case 1 & 2
+                if rest_path_vec.len() % 2 != 0 {
+                    let key = rest_path_vec[0].clone();
+                    let mut field_vec: Vec<String> = vec![];
+                    let mut value_vec: Vec<Value> = vec![];
+
+                    for (idx, item) in rest_path_vec[1..].iter().enumerate() {
+                        if idx % 2 == 0 {
+                            field_vec.push(item.clone());
+                        } else {
+                            value_vec.push(item.as_str().into());
+                        }
+                    }
+                    assert_eq!(field_vec.len(), value_vec.len());
+
+                    let mut fv_map = Map::new();
+                    let len = field_vec.len();
+                    for idx in 0..len {
+                        fv_map.insert(field_vec[idx].clone(), value_vec[idx].clone());
+                    }
+
+                    return Args {
+                        valid: true,
+                        command: String::from("HSET"),
+                        key,
+                        val: None,
+                        ttl_ms: Option::from(u64::MAX),
+                        kv: Option::from(fv_map),
+                        key_list: None,
+                    }
+                // expiration time specified, case 3 
+                } else {
+                    let key = rest_path_vec[0].clone();
+                    let mut field_vec: Vec<String> = vec![];
+                    let mut value_vec: Vec<Value> = vec![];
+                    let mut ttl_ms: u64 = 0;
+
+                    for (idx, item) in rest_path_vec[1..].iter().enumerate() {
+                        // The last item is ttl
+                        if idx == rest_path_vec.len() - 2 {
+                            match item.parse::<u64>() {
+                                Ok(val) => ttl_ms = val,
+                                Err(_e) => {
+                                    return Args::new_invalid("HSET");
+                                }
+                            }
+                        }
+
+                        if idx % 2 == 0 {
+                            field_vec.push(item.clone());
+                        } else {
+                            value_vec.push(item.as_str().into());
+                        }
+                    }
+                    assert_eq!(field_vec.len(), value_vec.len());
+
+                    let mut fv_map = Map::new();
+                    let len = field_vec.len();
+                    for idx in 0..len {
+                        fv_map.insert(field_vec[idx].clone(), value_vec[idx].clone());
+                    }
+
+                    return Args {
+                        valid: true,
+                        command: String::from("HSET"),
+                        key,
+                        val: None,
+                        ttl_ms: Option::from(ttl_ms),
+                        kv: Option::from(fv_map),
+                        key_list: None,
                     }
                 }
             }
