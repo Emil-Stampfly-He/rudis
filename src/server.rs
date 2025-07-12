@@ -1,4 +1,4 @@
-use crate::command::{Command, Del, Get, HSet, MultipleSet, Set};
+use crate::command::{Command, Del, Get, HGet, HSet, MultipleSet, Set};
 use crate::connection::Connection;
 use bytes::Bytes;
 use crossbeam_utils::CachePadded;
@@ -126,6 +126,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
             Command::Del(cmd) => handle_del(cmd, &db),
             Command::GetDel(get_cmd, del_cmd) => handle_getdel(get_cmd, del_cmd, &db),
             Command::HSet(cmd) => handle_hset(cmd, &db),
+            Command::HGet(cmd) => handle_hget(cmd, &db),
             Command::Invalid => Bytes::copy_from_slice(b"{}"),
         };
 
@@ -297,6 +298,38 @@ fn handle_hset(cmd: HSet, db: &ShardedDb) -> Bytes {
     }
 
     Bytes::copy_from_slice(b"{\"HSET\": \"OK\"}")
+}
+
+fn handle_hget(cmd: HGet, db: &ShardedDb) -> Bytes {
+    if cmd.is_valid() {
+        // lazy deletion from EXPIRE_MAP & db if expired
+        // fixed lock order: lock EXPIRE_MAP first, then lock sharded db
+        let now = current_unix_timestamp();
+        let idx = hash_key(cmd.key()) % db.len();
+
+        {
+            let mut expire_map = EXPIRE_MAP.lock().unwrap();
+            if let Some(&(created_time, ttl_ms)) = expire_map.get(cmd.key()) {
+                if ttl_ms != u64::MAX && created_time + ttl_ms < now {
+                    expire_map.remove(cmd.key());
+                    drop(expire_map); // prevent nested lock
+
+                    let mut db = db[idx].lock().unwrap();
+                    db.remove(cmd.key());
+                }
+            }
+        }
+
+        let db = db[idx].lock().unwrap();
+        if let Some(DbValue::Hash(value)) = db.get(cmd.key()) {
+            let value_string = value.get(cmd.field()).unwrap().as_str().unwrap();
+            Bytes::from(format!("{{\"{}\":{{\"{}\":\"{}\"}}}}", cmd.key(), cmd.field(), value_string))
+        } else {
+            Bytes::copy_from_slice(b"{}")
+        }
+    } else {
+        Bytes::copy_from_slice(b"{\"HGET\": \"Invalid \"}")
+    }
 }
 
 fn current_unix_timestamp() -> u64 {

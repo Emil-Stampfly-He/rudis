@@ -12,6 +12,7 @@ use serde_json::{Map, Result, Value};
 pub use set::{MultipleSet, Set};
 pub use del::Del;
 pub use hset::HSet;
+pub use hget::HGet;
 
 pub enum Command {
     Set(Set),
@@ -20,6 +21,7 @@ pub enum Command {
     Del(Del),
     GetDel(Get, Del),
     HSet(HSet),
+    HGet(HGet),
     Invalid,
 }
 
@@ -112,6 +114,12 @@ impl Command {
                 } else { 
                     Command::HSet(HSet::new_invalid())
                 }
+            }
+            "HGET" => {
+                if !arg.valid {
+                    return Command::HGet(HGet::new_invalid());
+                }
+                Command::HGet(HGet::from_key_field(arg.key, arg.field))
             }
             _ => Command::Invalid,
         }
@@ -319,6 +327,27 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         kv: Option::from(fv_map),
                         key_list: None,
                     }
+                }
+            }
+            // HGET key field
+            // curl 'localhost:6379/hget/key/field'
+            "HGET" => {
+                if all_path_vec.len() != 3 {
+                    return Args::new_invalid("HGET");
+                }
+                
+                let key = all_path_vec[1].to_string();
+                let field = all_path_vec[2].to_string();
+                
+                return Args {
+                    valid: true,
+                    command: String::from("HGET"),
+                    key,
+                    field,
+                    val: None,
+                    ttl_ms: None,
+                    kv: None,
+                    key_list: None,
                 }
             }
             _ => return Args::new_invalid("INVALID"),
