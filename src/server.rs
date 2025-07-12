@@ -38,40 +38,9 @@ impl Server {
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let listener = TcpListener::bind(self.addr).await?;
         let db = self.db.clone();
-        
-        // active deletion executed every 100 ms for 20 random keys
-        tokio::spawn(async move {
-            let mut interval = interval(Duration::from_millis(100));
-            loop {
-                interval.tick().await;
 
-                // amount of a bunch: 20
-                let sample_keys= {
-                    let expire_map = EXPIRE_MAP.lock().unwrap();
-                    expire_map
-                        .iter()
-                        .map(|(key, _)| key.clone())
-                        .choose_multiple(&mut rand::rng(), 20)
-                        .into_iter()
-                        .collect::<Vec<String>>()
-                };
-
-                let now = current_unix_timestamp();
-                for key in sample_keys {
-                    let mut expire_map = EXPIRE_MAP.lock().unwrap();
-                    if let Some(&(created_time, ttl_ms)) = expire_map.get(&key) {
-                        if ttl_ms != u64::MAX && created_time + ttl_ms < now {
-                            expire_map.remove(&key);
-                            drop(expire_map); // prevent nested lock
-
-                            let idx = hash_key(&key) % db.len();
-                            let mut db = db[idx].lock().unwrap();
-                            db.remove(&key);
-                        }
-                    }
-                }
-            }
-        });
+        // active deletion for keys with TTL
+        active_cleanup_task(db).await;
 
         loop {
             let (socket, _) = listener.accept().await?;
@@ -81,6 +50,42 @@ impl Server {
             });
         }
     }
+}
+
+/// Active deletion executed every 100 ms for 20 random keys
+async fn active_cleanup_task(db: ShardedDb) {
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_millis(100));
+        loop {
+            interval.tick().await;
+
+            // amount of a bunch: 20
+            let sample_keys= {
+                let expire_map = EXPIRE_MAP.lock().unwrap();
+                expire_map
+                    .iter()
+                    .map(|(key, _)| key.clone())
+                    .choose_multiple(&mut rand::rng(), 20)
+                    .into_iter()
+                    .collect::<Vec<String>>()
+            };
+
+            let now = current_unix_timestamp();
+            for key in sample_keys {
+                let mut expire_map = EXPIRE_MAP.lock().unwrap();
+                if let Some(&(created_time, ttl_ms)) = expire_map.get(&key) {
+                    if ttl_ms != u64::MAX && created_time + ttl_ms < now {
+                        expire_map.remove(&key);
+                        drop(expire_map); // prevent nested lock
+
+                        let idx = hash_key(&key) % db.len();
+                        let mut db = db[idx].lock().unwrap();
+                        db.remove(&key);
+                    }
+                }
+            }
+        }
+    });
 }
 
 fn new_sharded_db(num_shards: usize) -> ShardedDb {
