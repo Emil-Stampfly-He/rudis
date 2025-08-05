@@ -1,5 +1,6 @@
 mod get;
 
+use std::collections::HashSet;
 pub use get::Get;
 
 mod set;
@@ -7,6 +8,7 @@ mod del;
 mod hset;
 mod hget;
 mod hgetall;
+mod sadd;
 
 use httparse::Request;
 use serde_json::{Map, Result, Value};
@@ -15,6 +17,7 @@ pub use del::Del;
 pub use hset::HSet;
 pub use hget::HGet;
 pub use hgetall::HGetAll;
+pub use sadd::SAdd;
 
 pub enum Command {
     Set(Set),
@@ -25,6 +28,7 @@ pub enum Command {
     HSet(HSet),
     HGet(HGet),
     HGetAll(HGetAll),
+    SAdd(SAdd),
     Invalid,
 }
 
@@ -35,6 +39,8 @@ struct Args {
     key: String,
     field: String,
     val: Option<String>,
+    val_list: Option<Vec<String>>,
+    val_set: Option<HashSet<String>>,
     ttl_ms: Option<u64>,
     kv: Option<Map<String, Value>>,
     key_list: Option<Vec<String>>,
@@ -48,6 +54,8 @@ impl Args {
             key: String::from(""),
             field: String::from(""),
             val: None,
+            val_list: None,
+            val_set: None,
             ttl_ms: None,
             kv: None,
             key_list: None,
@@ -130,6 +138,13 @@ impl Command {
                 }
                 Command::HGetAll(HGetAll::from_key(arg.key))
             }
+            "SADD" => {
+                if !arg.valid {
+                    return Command::SAdd(SAdd::new_invalid());
+                }
+                let val_set = arg.val_set.unwrap();
+                Command::SAdd(SAdd::from_key_val_list(arg.key, val_set))
+            }
             _ => Command::Invalid,
         }
     }
@@ -154,6 +169,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     key: String::from(key),
                     field: String::from(""),
                     val: None,
+                    val_list: None,
+                    val_set: None,
                     ttl_ms: None,
                     kv: None,
                     key_list: None,
@@ -175,6 +192,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             key: String::from(all_path_vec[1]),
                             field: String::from(""),
                             val: Some(String::from(all_path_vec[2])),
+                            val_list: None,
+                            val_set: None,
                             ttl_ms: Some(u64::MAX),
                             kv: None,
                             key_list: None,
@@ -198,6 +217,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                             key: String::from(key),
                             field: String::from(""),
                             val: Some(String::from(val)),
+                            val_list: None,
+                            val_set: None,
                             ttl_ms: Some(ttl_ms.parse().unwrap()),
                             kv: None,
                             key_list: None,
@@ -223,6 +244,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         key: String::from(""),
                         field: String::from(""),
                         val: None,
+                        val_list: None,
+                        val_set: None,
                         ttl_ms: None,
                         kv: None,
                         key_list: Some(key_list),
@@ -247,6 +270,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         key: key.clone(),
                         field: String::from(""),
                         val: None,
+                        val_list: None,
+                        val_set: None,
                         ttl_ms: None,
                         kv: None,
                         key_list: Some(key_list),
@@ -293,6 +318,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         key,
                         field: String::from(""),
                         val: None,
+                        val_list: None,
+                        val_set: None,
                         ttl_ms: Option::from(u64::MAX),
                         kv: Option::from(fv_map),
                         key_list: None,
@@ -332,6 +359,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         key,
                         field: String::from(""),
                         val: None,
+                        val_list: None,
+                        val_set: None,
                         ttl_ms: Option::from(ttl_ms),
                         kv: Option::from(fv_map),
                         key_list: None,
@@ -354,12 +383,14 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     key,
                     field,
                     val: None,
+                    val_list: None,
+                    val_set: None,
                     ttl_ms: None,
                     kv: None,
                     key_list: None,
                 }
             }
-            // HGET key field
+            // HGETALL key
             // curl 'localhost:6379/hgetall/key'
             "HGETALL" => {
                 if all_path_vec.len() != 2 {
@@ -373,6 +404,33 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                     key,
                     field: String::from(""),
                     val: None,
+                    val_list: None,
+                    val_set: None,
+                    ttl_ms: None,
+                    kv: None,
+                    key_list: None,
+                }
+            }
+            // SADD key member1 [member2 ...] 
+            // case 1: curl 'localhost:6379/sadd/key/a'
+            // case 2: curl 'localhost:6379/sadd/key/a/b/c/d/e'
+            "SADD" => {
+                if all_path_vec.len() < 3 {
+                    return Args::new_invalid("SADD");
+                }
+                
+                let key = all_path_vec[1].to_string();
+                let val_set: HashSet<String> = all_path_vec[2..].iter()
+                    .map(|key| { key.to_string().into() })
+                    .collect();
+                return Args {
+                    valid: true,
+                    command: String::from("SADD"),
+                    key,
+                    field: String::from(""),
+                    val: None,
+                    val_list: None,
+                    val_set: Some(val_set),
                     ttl_ms: None,
                     kv: None,
                     key_list: None,
@@ -399,6 +457,8 @@ fn make_args(req: &Request, request_buff: &[u8], idx_of_body: usize) -> Args {
                         key: String::from(""),
                         field: String::from(""),
                         val: None,
+                        val_list: None,
+                        val_set: None,
                         ttl_ms: Some(ttl_ms),
                         kv: Some(obj.clone()),
                         key_list: None,

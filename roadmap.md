@@ -6,7 +6,7 @@
 -[x] `HSET key field1 value1 [field2 value2 ...]`
   -[x] `HSET key field1 value1 [field2 value2 ...] [EX]`
 -[x] `HGET key field`
--[ ] `HGETALL key`
+-[x] `HGETALL key`
 -[ ] `SADD key member1 [member2 ...]`
 -[ ] `SISMEMBER key member`
 -[ ] `SMEMBERS key` 

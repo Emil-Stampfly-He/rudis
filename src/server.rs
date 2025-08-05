@@ -1,4 +1,4 @@
-use crate::command::{Command, Del, Get, HGet, HGetAll, HSet, MultipleSet, Set};
+use crate::command::{Command, Del, Get, HGet, HGetAll, HSet, MultipleSet, SAdd, Set};
 use crate::connection::Connection;
 use bytes::Bytes;
 use crossbeam_utils::CachePadded;
@@ -128,6 +128,7 @@ async fn process(socket: TcpStream, db: ShardedDb) {
             Command::HSet(cmd) => handle_hset(cmd, &db),
             Command::HGet(cmd) => handle_hget(cmd, &db),
             Command::HGetAll(cmd) => handle_hgetall(cmd, &db),
+            Command::SAdd(cmd) => handle_sadd(cmd, &db),
             Command::Invalid => Bytes::copy_from_slice(b"{}"),
         };
 
@@ -350,8 +351,8 @@ fn handle_hgetall(cmd: HGetAll, db: &ShardedDb) -> Bytes {
         }
 
         let db = db[idx].lock().unwrap();
-        if let Some(DbValue::Hash(value)) = db.get(cmd.key()) {
-           let mut outer = Map::new();
+        if let Some(DbValue::Hash(value)) = db.get(cmd.key()) { 
+            let mut outer = Map::new();
             outer.insert(cmd.key().to_string(), Value::Object(value.clone()));
 
             let json_string = Value::Object(outer).to_string();
@@ -362,6 +363,10 @@ fn handle_hgetall(cmd: HGetAll, db: &ShardedDb) -> Bytes {
     } else {
         Bytes::copy_from_slice(b"{\"HGET\": \"Invalid \"}")
     }
+}
+
+fn handle_sadd(cmd: SAdd, db: &ShardedDb) -> Bytes {
+    todo!()
 }
 
 fn current_unix_timestamp() -> u64 {
